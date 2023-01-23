@@ -27,6 +27,9 @@
 
 #include <stdio.h>
 
+#include "led.h"
+#include "nvic_table.h"
+
 #include "CANopen.h"
 #include "OD.h"
 #include "CO_storageBlank.h"
@@ -52,7 +55,10 @@
 /* Global variables and objects */
 CO_t *CO = NULL; /* CANopen object */
 uint8_t LED_red, LED_green;
+volatile uint32_t ticksMs = 0;
 
+/* 1ms interrupt handler */
+void tmrTask_thread(void);
 
 /* main ***********************************************************************/
 int main (void){
@@ -80,7 +86,6 @@ int main (void){
 #endif
 
     /* Configure microcontroller. */
-
 
     /* Allocate memory */
     CO_config_t *config_ptr = NULL;
@@ -184,7 +189,12 @@ int main (void){
             return 0;
         }
 
-        /* Configure Timer interrupt function for execution every 1 millisecond */
+        /* CPU's system tick timer is used to generate interrupt every 1 millisecond. */
+        if (SysTick_Config(SystemCoreClock / 10)) {
+            log_printf("Error: Can't setup system tick\n");
+            return 0;
+        }
+        MXC_NVIC_SetVector(SysTick_IRQn, tmrTask_thread);
 
 
         /* Configure CAN transmit and receive interrupt */
@@ -213,15 +223,23 @@ int main (void){
         log_printf("CANopenNode - Running...\n");
         fflush(stdout);
 
+        uint32_t lastCall = 0;
         while(reset == CO_RESET_NOT){
 /* loop for normal program execution ******************************************/
             /* get time difference since last function call */
-            uint32_t timeDifference_us = 500;
 
-            /* CANopen process */
-            reset = CO_process(CO, false, timeDifference_us, NULL);
-            LED_red = CO_LED_RED(CO->LEDs, CO_LED_CANopen);
-            LED_green = CO_LED_GREEN(CO->LEDs, CO_LED_CANopen);
+            if ((ticksMs - lastCall) > 0) {
+                uint32_t timeDifference_us = (ticksMs - lastCall) * 1000;
+                lastCall = ticksMs;
+                /* CANopen process */
+                reset = CO_process(CO, false, timeDifference_us, NULL);
+                LED_red = CO_LED_RED(CO->LEDs, CO_LED_CANopen);
+                LED_green = CO_LED_GREEN(CO->LEDs, CO_LED_CANopen);
+                if (num_leds)
+                    LED_green ? LED_On(0) : LED_Off(0);
+                if (num_leds > 1)
+                    LED_red ? LED_On(1) : LED_Off(1);
+            }
 
             /* Nonblocking application code may go here. */
 
@@ -232,7 +250,7 @@ int main (void){
     }
 
 
-/* program exit ***************************************************************/
+    /* program exit ***************************************************************/
     /* stop threads */
 
 
@@ -249,28 +267,26 @@ int main (void){
 
 /* timer thread executes in constant intervals ********************************/
 void tmrTask_thread(void){
-
-    for(;;) {
-        CO_LOCK_OD(CO->CANmodule);
-        if (!CO->nodeIdUnconfigured && CO->CANmodule->CANnormal) {
-            bool_t syncWas = false;
-            /* get time difference since last function call */
-            uint32_t timeDifference_us = 1000;
+    ticksMs++;
+    CO_LOCK_OD(CO->CANmodule);
+    if (!CO->nodeIdUnconfigured && CO->CANmodule->CANnormal) {
+        bool_t syncWas = false;
+        /* get time difference since last function call */
+        uint32_t timeDifference_us = 1000;
 
 #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
-            syncWas = CO_process_SYNC(CO, timeDifference_us, NULL);
+        syncWas = CO_process_SYNC(CO, timeDifference_us, NULL);
 #endif
 #if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
-            CO_process_RPDO(CO, syncWas, timeDifference_us, NULL);
+        CO_process_RPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
 #if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
-            CO_process_TPDO(CO, syncWas, timeDifference_us, NULL);
+        CO_process_TPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
 
-            /* Further I/O or nonblocking application code may go here. */
-        }
-        CO_UNLOCK_OD(CO->CANmodule);
+        /* Further I/O or nonblocking application code may go here. */
     }
+    CO_UNLOCK_OD(CO->CANmodule);
 }
 
 
