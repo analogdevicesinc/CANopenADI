@@ -26,7 +26,10 @@
 
 
 #include <stdio.h>
+#include <string.h>
 
+#include "mxc_device.h"
+#include "can.h"
 #include "led.h"
 #include "nvic_table.h"
 
@@ -59,6 +62,9 @@ volatile uint32_t ticksMs = 0;
 
 /* 1ms interrupt handler */
 void tmrTask_thread(void);
+
+/* CAN interrupt handler */
+void CO_CAN1InterruptHandler(void);
 
 /* main ***********************************************************************/
 int main (void){
@@ -131,7 +137,16 @@ int main (void){
         CO->CANmodule->CANnormal = false;
 
         /* Enter CAN configuration. */
+
+#if TARGET_NUM == 32662
+        CANptr = MXC_CAN0;
+#elif TARGET_NUM == 32690
+        CANptr = MXC_CAN0;
+#else
+#error "Unsupported target"
+#endif
         CO_CANsetConfigurationMode((void *)&CANptr);
+        CO->CANmodule->CANptr = CANptr;
         CO_CANmodule_disable(CO->CANmodule);
 
         /* initialize CANopen */
@@ -140,6 +155,15 @@ int main (void){
             log_printf("Error: CAN initialization failed: %d\n", err);
             return 0;
         }
+
+        /* configure CAN interrupt registers */
+        MXC_CAN_EnableInt(MXC_CAN_GET_IDX(CO->CANmodule->CANptr),
+                MXC_F_CAN_INTEN_DOR | MXC_F_CAN_INTEN_BERR
+                | MXC_F_CAN_INTEN_TX | MXC_F_CAN_INTEN_RX
+                | MXC_F_CAN_INTEN_ERPSV | MXC_F_CAN_INTEN_ERWARN
+                | MXC_F_CAN_INTEN_AL, 0);
+        NVIC_EnableIRQ(CAN_IRQn);
+        MXC_NVIC_SetVector(CAN_IRQn, CO_CAN1InterruptHandler);
 
         CO_LSS_address_t lssAddress = {.identity = {
             .vendorID = OD_PERSIST_COMM.x1018_identity.vendor_ID,
@@ -289,9 +313,14 @@ void tmrTask_thread(void){
     CO_UNLOCK_OD(CO->CANmodule);
 }
 
-
 /* CAN interrupt function executes on received CAN message ********************/
-void /* interrupt */ CO_CAN1InterruptHandler(void){
-
-    /* clear interrupt flag */
+void CO_CAN1InterruptHandler(void){
+    /* interrupt flag cleared in MXC_CAN_Handler */
+#if TARGET_NUM == 32662
+    MXC_CAN_Handler(MXC_CAN_GET_IDX(MXC_CAN0));
+#elif TARGET_NUM == 32690
+    MXC_CAN_Handler(MXC_CAN_GET_IDX(MXC_CAN0));
+#else
+#error "Unsupported target"
+#endif
 }
