@@ -35,10 +35,10 @@
 #define MAP_B   1
 
 /* Global variables and objects */
-mxc_can_req_t rxReq;
-mxc_can_msg_info_t rxInfo;
-uint8_t rxData[64];
-CO_CANmodule_t *CANthis;
+static mxc_can_req_t rxReq;
+static mxc_can_msg_info_t rxInfo;
+static uint8_t rxData[64];
+static CO_CANmodule_t *CANthis;
 
 /* CAN driver callback functions */
 void canUnitEvent_cb(uint32_t can_idx, uint32_t event);
@@ -99,6 +99,9 @@ CO_ReturnError_t CO_CANmodule_init(
     CANmodule->firstCANtxMessage = true;
     CANmodule->CANtxCount = 0U;
     CANmodule->errOld = 0U;
+    CANmodule->txLock = 0;
+    CANmodule->emcyLock = 0;
+    CANmodule->odLock = 0;
 
     CANthis = CANmodule;
 
