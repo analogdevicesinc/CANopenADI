@@ -38,6 +38,8 @@
 #include "CO_driver_custom.h"
 #endif
 
+#include "mxc_lock.h"
+
 /* Disable storage */
 #define CO_CONFIG_STORAGE	0x00
 
@@ -103,6 +105,9 @@ typedef struct {
     volatile bool_t firstCANtxMessage;
     volatile uint16_t CANtxCount;
     uint32_t errOld;
+    uint32_t txLock;
+    uint32_t emcyLock;
+    uint32_t odLock;
 } CO_CANmodule_t;
 
 
@@ -118,16 +123,16 @@ typedef struct {
 
 
 /* (un)lock critical section in CO_CANsend() */
-#define CO_LOCK_CAN_SEND(CAN_MODULE)
-#define CO_UNLOCK_CAN_SEND(CAN_MODULE)
+#define CO_LOCK_CAN_SEND(CAN_MODULE)    MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->txLock, 1)
+#define CO_UNLOCK_CAN_SEND(CAN_MODULE)  MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->txLock)
 
 /* (un)lock critical section in CO_errorReport() or CO_errorReset() */
-#define CO_LOCK_EMCY(CAN_MODULE)
-#define CO_UNLOCK_EMCY(CAN_MODULE)
+#define CO_LOCK_EMCY(CAN_MODULE)    MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock, 1)
+#define CO_UNLOCK_EMCY(CAN_MODULE)  MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock)
 
 /* (un)lock critical section when accessing Object Dictionary */
-#define CO_LOCK_OD(CAN_MODULE)
-#define CO_UNLOCK_OD(CAN_MODULE)
+#define CO_LOCK_OD(CAN_MODULE)      MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->odLock, 1)
+#define CO_UNLOCK_OD(CAN_MODULE)    MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->odLock)
 
 /* Synchronization between CAN receive and message processing threads. */
 #define CO_MemoryBarrier()
