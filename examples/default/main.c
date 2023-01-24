@@ -214,7 +214,7 @@ int main (void){
         }
 
         /* CPU's system tick timer is used to generate interrupt every 1 millisecond. */
-        if (SysTick_Config(SystemCoreClock / 10)) {
+        if (SysTick_Config(SystemCoreClock / 1000)) {
             log_printf("Error: Can't setup system tick\n");
             return 0;
         }

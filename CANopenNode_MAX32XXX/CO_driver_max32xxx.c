@@ -128,7 +128,7 @@ CO_ReturnError_t CO_CANmodule_init(
 #endif
 
     /* Configure CAN timing */
-    if (MXC_CAN_SetBitRate(MXC_CAN_GET_CAN(CANmodule->CANptr),
+    if (MXC_CAN_SetBitRate(MXC_CAN_GET_IDX(CANmodule->CANptr),
             MXC_CAN_BITRATE_SEL_NOMINAL, bitrate,
             MXC_CAN_BIT_SEGMENTS(7, 2, 2)) != E_NO_ERROR) {
         printf("%s: Error: MXC_CAN_SetBitrate() failed\n", __func__);
@@ -147,7 +147,8 @@ CO_ReturnError_t CO_CANmodule_init(
         /* identifier will be received */
         /* Configure mask 0 so, that all messages with standard identifier are accepted */
         MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
-                MXC_CAN_FILT_CFG_SINGLE_STD_ID, 0x7FF, 0);
+                MXC_CAN_FILT_CFG_MASK_ADD | MXC_CAN_FILT_CFG_SINGLE_STD_ID,
+                0x7FF, 0);
     }
 
     /* Store message read request */
@@ -396,12 +397,6 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
 
 
 /******************************************************************************/
-typedef struct {
-    uint32_t ident;
-    uint8_t DLC;
-    uint8_t data[8];
-} CO_CANrxMsg_t;
-
 void CO_CANTXinterrupt(CO_CANmodule_t *CANmodule){
     /* Clear interrupt flag */
 
