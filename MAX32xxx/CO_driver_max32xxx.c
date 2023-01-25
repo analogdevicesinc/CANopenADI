@@ -25,21 +25,45 @@
  * limitations under the License.
  */
 
+#include <stdio.h>
+
+#include "mxc_device.h"
+#include "can.h"
 
 #include "301/CO_driver.h"
 
+#define MAP_B   1
+
+/* Global variables and objects */
+mxc_can_req_t rxReq;
+mxc_can_msg_info_t rxInfo;
+uint8_t rxData[64];
+CO_CANmodule_t *CANthis;
+
+/* CAN driver callback functions */
+void canUnitEvent_cb(uint32_t can_idx, uint32_t event);
+void canObjEvent_cb(uint32_t can_idx, uint32_t event);
 
 /******************************************************************************/
 void CO_CANsetConfigurationMode(void *CANptr){
     /* Put CAN module in configuration mode */
+    int err = MXC_CAN_SetMode(MXC_CAN_GET_IDX(CANptr),
+            MXC_CAN_MODE_INITIALIZATION);
+    if (err != E_NO_ERROR) {
+        printf("%s: Error: MXC_CAN_SetMode() failed: %d\n", __func__, err);
+    }
 }
 
 
 /******************************************************************************/
 void CO_CANsetNormalMode(CO_CANmodule_t *CANmodule){
     /* Put CAN module in normal mode */
-
-    CANmodule->CANnormal = true;
+    if (MXC_CAN_SetMode(MXC_CAN_GET_IDX(CANmodule->CANptr),
+            MXC_CAN_MODE_NORMAL) != E_NO_ERROR) {
+        printf("%s: Error: MXC_CAN_SetMode() failed\n", __func__);
+    } else {
+        CANmodule->CANnormal = true;
+    }
 }
 
 
@@ -54,6 +78,7 @@ CO_ReturnError_t CO_CANmodule_init(
         uint16_t                CANbitRate)
 {
     uint16_t i;
+    uint32_t bitrate = CANbitRate * 1000;
 
     /* verify arguments */
     if(CANmodule==NULL || rxArray==NULL || txArray==NULL){
@@ -68,11 +93,14 @@ CO_ReturnError_t CO_CANmodule_init(
     CANmodule->txSize = txSize;
     CANmodule->CANerrorStatus = 0;
     CANmodule->CANnormal = false;
-    CANmodule->useCANrxFilters = (rxSize <= 32U) ? true : false;/* microcontroller dependent */
+    /* Number of hardware filters are usually less than rxSize. */
+    CANmodule->useCANrxFilters = false;
     CANmodule->bufferInhibitFlag = false;
     CANmodule->firstCANtxMessage = true;
     CANmodule->CANtxCount = 0U;
     CANmodule->errOld = 0U;
+
+    CANthis = CANmodule;
 
     for(i=0U; i<rxSize; i++){
         rxArray[i].ident = 0U;
@@ -86,10 +114,26 @@ CO_ReturnError_t CO_CANmodule_init(
 
 
     /* Configure CAN module registers */
-
+#if TARGET_NUM == 32662
+    if (MXC_CAN_Init(MXC_CAN_GET_IDX(CANmodule->CANptr), MXC_CAN_OBJ_CFG_TXRX,
+            canUnitEvent_cb, canObjEvent_cb, MAP_B) != E_NO_ERROR) {
+        return CO_ERROR_ILLEGAL_ARGUMENT;
+    }
+#elif TARGET_NUM == 32690
+    if (MXC_CAN_Init(MXC_CAN_GET_IDX(CANmodule->CANptr),
+            MXC_CAN_OBJ_CFG_TX_RX_DATA, canUnitEvent_cb,
+            canObjEvent_cb) != E_NO_ERROR) {
+        return CO_ERROR_ILLEGAL_ARGUMENT;
+    }
+#endif
 
     /* Configure CAN timing */
-
+    if (MXC_CAN_SetBitRate(MXC_CAN_GET_IDX(CANmodule->CANptr),
+            MXC_CAN_BITRATE_SEL_NOMINAL, bitrate,
+            MXC_CAN_BIT_SEGMENTS(7, 2, 2)) != E_NO_ERROR) {
+        printf("%s: Error: MXC_CAN_SetBitrate() failed\n", __func__);
+        return CO_ERROR_ILLEGAL_BAUDRATE;
+    }
 
     /* Configure CAN module hardware filters */
     if(CANmodule->useCANrxFilters){
@@ -102,11 +146,20 @@ CO_ReturnError_t CO_CANmodule_init(
         /* CAN module filters are not used, all messages with standard 11-bit */
         /* identifier will be received */
         /* Configure mask 0 so, that all messages with standard identifier are accepted */
+        MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
+                MXC_CAN_FILT_CFG_MASK_ADD | MXC_CAN_FILT_CFG_SINGLE_STD_ID,
+                0x7FF, 0);
     }
 
-
-    /* configure CAN interrupt registers */
-
+    /* Store message read request */
+    rxReq.data = rxData;
+    rxReq.data_sz = sizeof(rxData);
+    rxReq.msg_info = &rxInfo;
+    if (MXC_CAN_MessageReadAsync(MXC_CAN_GET_IDX(CANmodule->CANptr), &rxReq)
+            < E_NO_ERROR) {
+        printf("%s: Error: MXC_CAN_MessageReadAsync() failed\n", __func__);
+        return CO_ERROR_ILLEGAL_ARGUMENT;
+    }
 
     return CO_ERROR_NO;
 }
@@ -116,6 +169,13 @@ CO_ReturnError_t CO_CANmodule_init(
 void CO_CANmodule_disable(CO_CANmodule_t *CANmodule) {
     if (CANmodule != NULL) {
         /* turn off the module */
+        if (MXC_CAN_PowerControl(MXC_CAN_GET_IDX(CANmodule->CANptr),
+                MXC_CAN_PWR_CTRL_OFF) != E_NO_ERROR) {
+            printf("%s: Error: MXC_CAN_PowerControl() failed\n", __func__);
+        }
+        if (MXC_CAN_UnInit(MXC_CAN_GET_IDX(CANmodule->CANptr)) != E_NO_ERROR) {
+            printf("%s: Error: MXC_CAN_UnInit() failed\n", __func__);
+        }
     }
 }
 
@@ -149,7 +209,7 @@ CO_ReturnError_t CO_CANrxBufferInit(
 
         /* Set CAN hardware module filter and mask. */
         if(CANmodule->useCANrxFilters){
-
+            __NOP();
         }
     }
     else{
@@ -183,6 +243,7 @@ CO_CANtx_t *CO_CANtxBufferInit(
 
         buffer->bufferFull = false;
         buffer->syncFlag = syncFlag;
+        buffer->DLC = noOfBytes;
     }
 
     return buffer;
@@ -190,8 +251,27 @@ CO_CANtx_t *CO_CANtxBufferInit(
 
 
 /******************************************************************************/
+static int can_MessageSend(void *canPtr, CO_CANtx_t *buffer)
+{
+    mxc_can_req_t req;
+    mxc_can_msg_info_t info;
+
+    info.brs = 0;
+    info.dlc = buffer->DLC;
+    info.esi = 0;
+    info.fdf = 0;
+    info.msg_id = MXC_CAN_STANDARD_ID(buffer->ident);
+    info.rsv = 0;
+    info.rtr = 0;
+    req.data = buffer->data;
+    req.data_sz = buffer->DLC;
+    req.msg_info = &info;
+    return MXC_CAN_MessageSendAsync(MXC_CAN_GET_IDX(canPtr), &req);
+}
+
 CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer){
     CO_ReturnError_t err = CO_ERROR_NO;
+    uint8_t canStat;
 
     /* Verify overflow */
     if(buffer->bufferFull){
@@ -204,7 +284,11 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer){
 
     CO_LOCK_CAN_SEND(CANmodule);
     /* if CAN TX buffer is free, copy message to it */
-    if(1 && CANmodule->CANtxCount == 0){
+    canStat = ((mxc_can_regs_t *) CANmodule->CANptr)->stat;
+    if((canStat & MXC_F_CAN_STAT_TXBUF) && CANmodule->CANtxCount == 0){
+        if (can_MessageSend(CANmodule->CANptr, buffer) != E_NO_ERROR) {
+            err = CO_ERROR_TX_BUSY;
+        }
         CANmodule->bufferInhibitFlag = buffer->syncFlag;
         /* copy message and txRequest */
     }
@@ -258,11 +342,13 @@ void CO_CANclearPendingSyncPDOs(CO_CANmodule_t *CANmodule){
 /******************************************************************************/
 /* Get error counters from the module. If necessary, function may use
     * different way to determine errors. */
-static uint16_t rxErrors=0, txErrors=0, overflow=0;
-
 void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
     uint32_t err;
+    uint16_t rxErrors=0, txErrors=0, overflow=0;
 
+    overflow = (MXC_CAN0->stat & MXC_F_CAN_STAT_DOR) ? 1 : 0;
+    txErrors = MXC_CAN0->txerr;
+    rxErrors = MXC_CAN0->rxerr;
     err = ((uint32_t)txErrors << 16) | ((uint32_t)rxErrors << 8) | overflow;
 
     if (CANmodule->errOld != err) {
@@ -311,94 +397,124 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
 
 
 /******************************************************************************/
-typedef struct {
-    uint32_t ident;
-    uint8_t DLC;
-    uint8_t data[8];
-} CO_CANrxMsg_t;
+void CO_CANTXinterrupt(CO_CANmodule_t *CANmodule){
+    /* Clear interrupt flag */
 
-void CO_CANinterrupt(CO_CANmodule_t *CANmodule){
+    /* First CAN message (bootup) was sent successfully */
+    CANmodule->firstCANtxMessage = false;
+    /* clear flag from previous message */
+    CANmodule->bufferInhibitFlag = false;
+    /* Are there any new messages waiting to be send */
+    if(CANmodule->CANtxCount > 0U){
+        uint16_t i;             /* index of transmitting message */
+        /* first buffer */
+        CO_CANtx_t *buffer = &CANmodule->txArray[0];
+        /* search through whole array of pointers to transmit message buffers. */
+        for(i = CANmodule->txSize; i > 0U; i--){
+            /* if message buffer is full, send it. */
+            if(buffer->bufferFull){
+                buffer->bufferFull = false;
+                CANmodule->CANtxCount--;
 
-    /* receive interrupt */
-    if(1){
-        CO_CANrxMsg_t *rcvMsg;      /* pointer to received message in CAN module */
-        uint16_t index;             /* index of received message */
-        uint32_t rcvMsgIdent;       /* identifier of the received message */
-        CO_CANrx_t *buffer = NULL;  /* receive message buffer from CO_CANmodule_t object. */
-        bool_t msgMatched = false;
-
-        rcvMsg = 0; /* get message from module here */
-        rcvMsgIdent = rcvMsg->ident;
-        if(CANmodule->useCANrxFilters){
-            /* CAN module filters are used. Message with known 11-bit identifier has */
-            /* been received */
-            index = 0;  /* get index of the received message here. Or something similar */
-            if(index < CANmodule->rxSize){
-                buffer = &CANmodule->rxArray[index];
-                /* verify also RTR */
-                if(((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U){
-                    msgMatched = true;
+                /* Copy message to CAN buffer */
+                CANmodule->bufferInhibitFlag = buffer->syncFlag;
+                /* canSend... */
+                if (can_MessageSend(CANmodule->CANptr, buffer) < E_NO_ERROR) {
+                    printf("Error: can_MessageSend() failed\n");
                 }
+                break; /* exit for loop */
             }
-        }
-        else{
-            /* CAN module filters are not used, message with any standard 11-bit identifier */
-            /* has been received. Search rxArray form CANmodule for the same CAN-ID. */
-            buffer = &CANmodule->rxArray[0];
-            for(index = CANmodule->rxSize; index > 0U; index--){
-                if(((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U){
-                    msgMatched = true;
-                    break;
-                }
-                buffer++;
-            }
-        }
+            buffer++;
+        }/* end of for loop */
 
-        /* Call specific function, which will process the message */
-        if(msgMatched && (buffer != NULL) && (buffer->CANrx_callback != NULL)){
-            buffer->CANrx_callback(buffer->object, (void*) rcvMsg);
+        /* Clear counter if no more messages */
+        if(i == 0U){
+            CANmodule->CANtxCount = 0U;
+            MXC_CAN_DisableInt(MXC_CAN_GET_IDX(CANmodule->CANptr), MXC_F_CAN_INTEN_TX, 0);
         }
-
-        /* Clear interrupt flag */
     }
+}
 
+void CO_CANRXinterrupt(CO_CANmodule_t *CANmodule){
+    CO_CANrxMsg_t rcvMsg;      /* pointer to received message in CAN module */
+    uint16_t index;             /* index of received message */
+    uint32_t rcvMsgIdent;       /* identifier of the received message */
+    CO_CANrx_t *buffer = NULL;  /* receive message buffer from CO_CANmodule_t object. */
+    bool_t msgMatched = false;
 
-    /* transmit interrupt */
-    else if(0){
-        /* Clear interrupt flag */
+    rcvMsg.ident = rxReq.msg_info->msg_id;
+    rcvMsg.DLC = rxReq.msg_info->dlc;
+    memcpy(rcvMsg.data, rxReq.data, rcvMsg.DLC);
 
-        /* First CAN message (bootup) was sent successfully */
-        CANmodule->firstCANtxMessage = false;
-        /* clear flag from previous message */
-        CANmodule->bufferInhibitFlag = false;
-        /* Are there any new messages waiting to be send */
-        if(CANmodule->CANtxCount > 0U){
-            uint16_t i;             /* index of transmitting message */
-
-            /* first buffer */
-            CO_CANtx_t *buffer = &CANmodule->txArray[0];
-            /* search through whole array of pointers to transmit message buffers. */
-            for(i = CANmodule->txSize; i > 0U; i--){
-                /* if message buffer is full, send it. */
-                if(buffer->bufferFull){
-                    buffer->bufferFull = false;
-                    CANmodule->CANtxCount--;
-
-                    /* Copy message to CAN buffer */
-                    CANmodule->bufferInhibitFlag = buffer->syncFlag;
-                    /* canSend... */
-                    break;                      /* exit for loop */
-                }
-                buffer++;
-            }/* end of for loop */
-
-            /* Clear counter if no more messages */
-            if(i == 0U){
-                CANmodule->CANtxCount = 0U;
+    rcvMsgIdent = rcvMsg.ident;
+    if(CANmodule->useCANrxFilters){
+        /* CAN module filters are used. Message with known 11-bit identifier has */
+        /* been received */
+        index = 0;  /* get index of the received message here. Or something similar */
+        if(index < CANmodule->rxSize){
+            buffer = &CANmodule->rxArray[index];
+            /* verify also RTR */
+            if(((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U){
+                msgMatched = true;
             }
         }
     }
     else{
-        /* some other interrupt reason */
+        /* CAN module filters are not used, message with any standard 11-bit identifier */
+        /* has been received. Search rxArray form CANmodule for the same CAN-ID. */
+        buffer = &CANmodule->rxArray[0];
+        for(index = CANmodule->rxSize; index > 0U; index--){
+            if(((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U){
+                msgMatched = true;
+                break;
+            }
+            buffer++;
+        }
+    }
+
+    /* Call specific function, which will process the message */
+    if(msgMatched && (buffer != NULL) && (buffer->CANrx_callback != NULL)){
+        buffer->CANrx_callback(buffer->object, (void*) &rcvMsg);
+    }
+}
+
+///< Callback used when a bus event occurs
+void canUnitEvent_cb(uint32_t can_idx, uint32_t event)
+{
+    switch (event) {
+    case MXC_CAN_UNIT_EVT_INACTIVE:
+        printf("Peripherals entered inactive state\n");
+        break;
+    case MXC_CAN_UNIT_EVT_ACTIVE:
+        printf("Peripherals entered active state\n");
+        break;
+    case MXC_CAN_UNIT_EVT_WARNING:
+        printf("Peripheral received error warning\n");
+        break;
+    case MXC_CAN_UNIT_EVT_PASSIVE:
+        printf("Peripheral entered passive state\n");
+        break;
+    case MXC_CAN_UNIT_EVT_BUS_OFF:
+        printf("Bus turned off\n");
+        break;
+    default:
+        printf("Undefined event\n");
+    }
+}
+
+///< Callback used when a transmission event occurs
+void canObjEvent_cb(uint32_t can_idx, uint32_t event)
+{
+    switch (event) {
+    case MXC_CAN_OBJ_EVT_TX_COMPLETE:
+        CO_CANTXinterrupt(CANthis);
+        break;
+    case MXC_CAN_OBJ_EVT_RX:
+        CO_CANRXinterrupt(CANthis);
+        break;
+    case MXC_CAN_OBJ_EVT_RX_OVERRUN:
+        break;
+    default:
+        printf("Undefined event\n");
     }
 }
