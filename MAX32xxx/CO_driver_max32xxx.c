@@ -40,6 +40,26 @@ static mxc_can_msg_info_t rxInfo;
 static uint8_t rxData[64];
 static CO_CANmodule_t *CANthis;
 
+typedef struct {
+    uint16_t nbrp;    /* Baud Rate Prescaler in Arbitration Phase */
+    uint8_t  nseg1;   /* Nominal Segment 1 Time in Arbitration */
+    uint8_t  nseg2;   /* Nominal Segment 1 Time in Arbitration */
+    uint8_t  nsjw;    /* Synchronization Jump Width in Arbitration */
+    uint16_t bitrate; /* Bitrate */
+
+} CO_CANbitRateData_t;
+
+const CO_CANbitRateData_t CO_CANbitRateData[] = {
+        {500, 7, 2, 2, 10},  /* 10 kbps */
+        {250, 7, 2, 2, 20},  /* 20 kbps */
+        {100, 7, 2, 2, 50},  /* 50 kbps */
+        {40,  7, 2, 2, 125}, /* 125 kbps */
+        {20,  7, 2, 2, 250}, /* 250 kbps */
+        {10,  7, 2, 2, 500}, /* 500 kbps */
+        {0,   7, 2, 2, 0},   /* 800 kbps unachievable */
+        {5,   7, 2, 2, 1000}, /* 1000 kbps */
+};
+
 /* CAN driver callback functions */
 void canUnitEvent_cb(uint32_t can_idx, uint32_t event);
 void canObjEvent_cb(uint32_t can_idx, uint32_t event);
@@ -79,6 +99,7 @@ CO_ReturnError_t CO_CANmodule_init(
 {
     uint16_t i;
     uint32_t bitrate = CANbitRate * 1000;
+    const CO_CANbitRateData_t *CANbitRateData = NULL;
 
     /* verify arguments */
     if(CANmodule==NULL || rxArray==NULL || txArray==NULL){
@@ -131,9 +152,22 @@ CO_ReturnError_t CO_CANmodule_init(
 #endif
 
     /* Configure CAN timing */
+    for (i = 0; i < sizeof(CO_CANbitRateData) / sizeof(CO_CANbitRateData[0]);
+            i++) {
+        if (CO_CANbitRateData[i].bitrate == CANbitRate) {
+            CANbitRateData = &CO_CANbitRateData[i];
+            break;
+        }
+    }
+
+    if (CANbitRateData == NULL) {
+        return CO_ERROR_ILLEGAL_BAUDRATE;
+    }
+
     if (MXC_CAN_SetBitRate(MXC_CAN_GET_IDX(CANmodule->CANptr),
             MXC_CAN_BITRATE_SEL_NOMINAL, bitrate,
-            MXC_CAN_BIT_SEGMENTS(7, 2, 2)) != E_NO_ERROR) {
+            MXC_CAN_BIT_SEGMENTS(CANbitRateData->nseg1, CANbitRateData
+                    ->nseg2, 2)) != E_NO_ERROR) {
         printf("%s: Error: MXC_CAN_SetBitrate() failed\n", __func__);
         return CO_ERROR_ILLEGAL_BAUDRATE;
     }
