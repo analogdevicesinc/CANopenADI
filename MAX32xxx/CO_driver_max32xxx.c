@@ -32,7 +32,21 @@
 
 #include "301/CO_driver.h"
 
+#ifdef DEBUG_MODE
+#define PRINT(...) printf(__VA_ARGS__)
+#else
+#define PRINT(...)
+#endif
+
 #define MAP_B   1
+
+#define CAN_STD_ID_MASK 0x7FFU
+#define CAN_RTR_FLAG    0x8000
+
+/* Error thresholds */
+#define CAN_ERR_THRESH_WARNING    96U
+#define CAN_ERR_THRESH_PASSIVE    128U
+#define CAN_ERR_THRESH_BUSOFF     256U
 
 /* Global variables and objects */
 static mxc_can_req_t rxReq;
@@ -70,7 +84,7 @@ void CO_CANsetConfigurationMode(void *CANptr){
     int err = MXC_CAN_SetMode(MXC_CAN_GET_IDX(CANptr),
             MXC_CAN_MODE_INITIALIZATION);
     if (err != E_NO_ERROR) {
-        printf("%s: Error: MXC_CAN_SetMode() failed: %d\n", __func__, err);
+        PRINT("%s: Error: MXC_CAN_SetMode() failed: %d\n", __func__, err);
     }
 }
 
@@ -80,7 +94,7 @@ void CO_CANsetNormalMode(CO_CANmodule_t *CANmodule){
     /* Put CAN module in normal mode */
     if (MXC_CAN_SetMode(MXC_CAN_GET_IDX(CANmodule->CANptr),
             MXC_CAN_MODE_NORMAL) != E_NO_ERROR) {
-        printf("%s: Error: MXC_CAN_SetMode() failed\n", __func__);
+        PRINT("%s: Error: MXC_CAN_SetMode() failed\n", __func__);
     } else {
         CANmodule->CANnormal = true;
     }
@@ -167,8 +181,8 @@ CO_ReturnError_t CO_CANmodule_init(
     if (MXC_CAN_SetBitRate(MXC_CAN_GET_IDX(CANmodule->CANptr),
             MXC_CAN_BITRATE_SEL_NOMINAL, bitrate,
             MXC_CAN_BIT_SEGMENTS(CANbitRateData->nseg1, CANbitRateData
-                    ->nseg2, 2)) != E_NO_ERROR) {
-        printf("%s: Error: MXC_CAN_SetBitrate() failed\n", __func__);
+                    ->nseg2, CANbitRateData->nsjw)) != E_NO_ERROR) {
+        PRINT("%s: Error: MXC_CAN_SetBitrate() failed\n", __func__);
         return CO_ERROR_ILLEGAL_BAUDRATE;
     }
 
@@ -185,7 +199,7 @@ CO_ReturnError_t CO_CANmodule_init(
         /* Configure mask 0 so, that all messages with standard identifier are accepted */
         MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
                 MXC_CAN_FILT_CFG_MASK_ADD | MXC_CAN_FILT_CFG_SINGLE_STD_ID,
-                0x7FF, 0);
+                CAN_STD_ID_MASK, 0);
     }
 
     /* Store message read request */
@@ -194,7 +208,7 @@ CO_ReturnError_t CO_CANmodule_init(
     rxReq.msg_info = &rxInfo;
     if (MXC_CAN_MessageReadAsync(MXC_CAN_GET_IDX(CANmodule->CANptr), &rxReq)
             < E_NO_ERROR) {
-        printf("%s: Error: MXC_CAN_MessageReadAsync() failed\n", __func__);
+        PRINT("%s: Error: MXC_CAN_MessageReadAsync() failed\n", __func__);
         return CO_ERROR_ILLEGAL_ARGUMENT;
     }
 
@@ -208,10 +222,10 @@ void CO_CANmodule_disable(CO_CANmodule_t *CANmodule) {
         /* turn off the module */
         if (MXC_CAN_PowerControl(MXC_CAN_GET_IDX(CANmodule->CANptr),
                 MXC_CAN_PWR_CTRL_OFF) != E_NO_ERROR) {
-            printf("%s: Error: MXC_CAN_PowerControl() failed\n", __func__);
+            PRINT("%s: Error: MXC_CAN_PowerControl() failed\n", __func__);
         }
         if (MXC_CAN_UnInit(MXC_CAN_GET_IDX(CANmodule->CANptr)) != E_NO_ERROR) {
-            printf("%s: Error: MXC_CAN_UnInit() failed\n", __func__);
+            PRINT("%s: Error: MXC_CAN_UnInit() failed\n", __func__);
         }
     }
 }
@@ -238,11 +252,11 @@ CO_ReturnError_t CO_CANrxBufferInit(
         buffer->CANrx_callback = CANrx_callback;
 
         /* CAN identifier and CAN mask, bit aligned with CAN module. Different on different microcontrollers. */
-        buffer->ident = ident & 0x07FFU;
+        buffer->ident = MXC_CAN_STANDARD_ID(ident);
         if(rtr){
-            buffer->ident |= 0x0800U;
+            buffer->ident |= MXC_CAN_BUF_CFG_RTR(1);
         }
-        buffer->mask = (mask & 0x07FFU) | 0x0800U;
+        buffer->mask = MXC_CAN_STANDARD_ID(mask) | MXC_CAN_BUF_CFG_RTR(1);
 
         /* Set CAN hardware module filter and mask. */
         if(CANmodule->useCANrxFilters){
@@ -272,11 +286,9 @@ CO_CANtx_t *CO_CANtxBufferInit(
         /* get specific buffer */
         buffer = &CANmodule->txArray[index];
 
-        /* CAN identifier, DLC and rtr, bit aligned with CAN module transmit buffer.
-         * Microcontroller specific. */
-        buffer->ident = ((uint32_t)ident & 0x07FFU)
-                      | ((uint32_t)(((uint32_t)noOfBytes & 0xFU) << 12U))
-                      | ((uint32_t)(rtr ? 0x8000U : 0U));
+        /* CAN identifier and rtr. */
+        buffer->ident = (MXC_CAN_STANDARD_ID(ident))
+                | ((uint32_t)(rtr ? CAN_RTR_FLAG : 0U));
 
         buffer->bufferFull = false;
         buffer->syncFlag = syncFlag;
@@ -299,7 +311,7 @@ static int can_MessageSend(void *canPtr, CO_CANtx_t *buffer)
     info.fdf = 0;
     info.msg_id = MXC_CAN_STANDARD_ID(buffer->ident);
     info.rsv = 0;
-    info.rtr = 0;
+    info.rtr = (buffer->ident & CAN_RTR_FLAG) ? 1 : 0;
     req.data = buffer->data;
     req.data_sz = buffer->DLC;
     req.msg_info = &info;
@@ -378,11 +390,12 @@ void CO_CANclearPendingSyncPDOs(CO_CANmodule_t *CANmodule){
 
 /******************************************************************************/
 /* Get error counters from the module. If necessary, function may use
-    * different way to determine errors. */
+ * different way to determine errors. */
 void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
     uint32_t err;
     uint16_t rxErrors=0, txErrors=0, overflow=0;
 
+    /* We may as well use event callbacks to obtain error status */
     overflow = (MXC_CAN0->stat & MXC_F_CAN_STAT_DOR) ? 1 : 0;
     txErrors = MXC_CAN0->txerr;
     rxErrors = MXC_CAN0->rxerr;
@@ -393,7 +406,7 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
 
         CANmodule->errOld = err;
 
-        if (txErrors >= 256U) {
+        if (txErrors >= CAN_ERR_THRESH_BUSOFF) {
             /* bus off */
             status |= CO_CAN_ERRTX_BUS_OFF;
         }
@@ -404,16 +417,16 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule) {
                                 CO_CAN_ERRTX_WARNING | CO_CAN_ERRTX_PASSIVE);
 
             /* rx bus warning or passive */
-            if (rxErrors >= 128) {
+            if (rxErrors >= CAN_ERR_THRESH_PASSIVE) {
                 status |= CO_CAN_ERRRX_WARNING | CO_CAN_ERRRX_PASSIVE;
-            } else if (rxErrors >= 96) {
+            } else if (rxErrors >= CAN_ERR_THRESH_WARNING) {
                 status |= CO_CAN_ERRRX_WARNING;
             }
 
             /* tx bus warning or passive */
-            if (txErrors >= 128) {
+            if (txErrors >= CAN_ERR_THRESH_PASSIVE) {
                 status |= CO_CAN_ERRTX_WARNING | CO_CAN_ERRTX_PASSIVE;
-            } else if (rxErrors >= 96) {
+            } else if (rxErrors >= CAN_ERR_THRESH_WARNING) {
                 status |= CO_CAN_ERRTX_WARNING;
             }
 
@@ -457,7 +470,7 @@ void CO_CANTXinterrupt(CO_CANmodule_t *CANmodule){
                 CANmodule->bufferInhibitFlag = buffer->syncFlag;
                 /* canSend... */
                 if (can_MessageSend(CANmodule->CANptr, buffer) < E_NO_ERROR) {
-                    printf("Error: can_MessageSend() failed\n");
+                    PRINT("Error: can_MessageSend() failed\n");
                 }
                 break; /* exit for loop */
             }
@@ -520,22 +533,22 @@ void canUnitEvent_cb(uint32_t can_idx, uint32_t event)
 {
     switch (event) {
     case MXC_CAN_UNIT_EVT_INACTIVE:
-        printf("Peripherals entered inactive state\n");
+        PRINT("Peripherals entered inactive state\n");
         break;
     case MXC_CAN_UNIT_EVT_ACTIVE:
-        printf("Peripherals entered active state\n");
+        PRINT("Peripherals entered active state\n");
         break;
     case MXC_CAN_UNIT_EVT_WARNING:
-        printf("Peripheral received error warning\n");
+        PRINT("Peripheral received error warning\n");
         break;
     case MXC_CAN_UNIT_EVT_PASSIVE:
-        printf("Peripheral entered passive state\n");
+        PRINT("Peripheral entered passive state\n");
         break;
     case MXC_CAN_UNIT_EVT_BUS_OFF:
-        printf("Bus turned off\n");
+        PRINT("Bus turned off\n");
         break;
     default:
-        printf("Undefined event\n");
+        PRINT("Undefined event\n");
     }
 }
 
@@ -552,6 +565,6 @@ void canObjEvent_cb(uint32_t can_idx, uint32_t event)
     case MXC_CAN_OBJ_EVT_RX_OVERRUN:
         break;
     default:
-        printf("Undefined event\n");
+        PRINT("Undefined event\n");
     }
 }
