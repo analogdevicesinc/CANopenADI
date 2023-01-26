@@ -28,6 +28,7 @@
 #include <stdio.h>
 
 #include "mxc_device.h"
+#include "mxc_lock.h"
 #include "can.h"
 
 #include "301/CO_driver.h"
@@ -567,4 +568,14 @@ void canObjEvent_cb(uint32_t can_idx, uint32_t event)
     default:
         PRINT("Undefined event\n");
     }
+}
+
+void CO_CANModule_Lock(uint32_t *lock)
+{
+    while (MXC_GetLock(lock, 1) != E_NO_ERROR) {}
+}
+
+void CO_CANModule_Unlock(uint32_t *lock)
+{
+    MXC_FreeLock(lock);
 }

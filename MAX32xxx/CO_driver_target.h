@@ -38,8 +38,6 @@
 #include "CO_driver_custom.h"
 #endif
 
-#include "mxc_lock.h"
-
 /* Disable storage */
 #define CO_CONFIG_STORAGE	0x00
 
@@ -121,18 +119,34 @@ typedef struct {
     void *addrNV;
 } CO_storage_entry_t;
 
+/**
+ * Wrapper around MCU specific lock function.
+ *
+ * Blocks until lock is acquired.
+ *
+ * @param lock Pointer to lock variable.
+ */
+void CO_CANModule_Lock(uint32_t *lock);
+
+
+/**
+ * Wrapper around MCU specific unlock function.
+ *
+ * @param lock Pointer to lock variable.
+ */
+void CO_CANModule_Unlock(uint32_t *lock);
 
 /* (un)lock critical section in CO_CANsend() */
-#define CO_LOCK_CAN_SEND(CAN_MODULE)    MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->txLock, 1)
-#define CO_UNLOCK_CAN_SEND(CAN_MODULE)  MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->txLock)
+#define CO_LOCK_CAN_SEND(CAN_MODULE)    CO_CANModule_Lock(&((CO_CANmodule_t *) CAN_MODULE)->txLock)
+#define CO_UNLOCK_CAN_SEND(CAN_MODULE)  CO_CANModule_Unlock(&((CO_CANmodule_t *) CAN_MODULE)->txLock)
 
 /* (un)lock critical section in CO_errorReport() or CO_errorReset() */
-#define CO_LOCK_EMCY(CAN_MODULE)    MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock, 1)
-#define CO_UNLOCK_EMCY(CAN_MODULE)  MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock)
+#define CO_LOCK_EMCY(CAN_MODULE)    CO_CANModule_Lock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock)
+#define CO_UNLOCK_EMCY(CAN_MODULE)  CO_CANModule_Unlock(&((CO_CANmodule_t *) CAN_MODULE)->emcyLock)
 
 /* (un)lock critical section when accessing Object Dictionary */
-#define CO_LOCK_OD(CAN_MODULE)      MXC_GetLock(&((CO_CANmodule_t *) CAN_MODULE)->odLock, 1)
-#define CO_UNLOCK_OD(CAN_MODULE)    MXC_FreeLock(&((CO_CANmodule_t *) CAN_MODULE)->odLock)
+#define CO_LOCK_OD(CAN_MODULE)      CO_CANModule_Lock(&((CO_CANmodule_t *) CAN_MODULE)->odLock)
+#define CO_UNLOCK_OD(CAN_MODULE)    CO_CANModule_Unlock(&((CO_CANmodule_t *) CAN_MODULE)->odLock)
 
 /* Synchronization between CAN receive and message processing threads. */
 #define CO_MemoryBarrier()
