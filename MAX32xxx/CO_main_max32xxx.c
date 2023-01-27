@@ -34,6 +34,7 @@
 
 #include "CANopen.h"
 #include "OD.h"
+#include "CO_application.h"
 #include "CO_storageBlank.h"
 
 
@@ -71,8 +72,8 @@ int main (void){
     CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
     uint32_t heapMemoryUsed;
     void *CANptr = NULL; /* CAN module address */
-    uint8_t pendingNodeId = 10; /* read from dip switches or nonvolatile memory, configurable by LSS slave */
-    uint8_t activeNodeId = 10; /* Copied from CO_pendingNodeId in the communication reset section */
+    uint8_t pendingNodeId = 0; /* read from dip switches or nonvolatile memory, configurable by LSS slave */
+    uint8_t activeNodeId = 0; /* Copied from CO_pendingNodeId in the communication reset section */
     uint16_t pendingBitRate = 125;  /* read from dip switches or nonvolatile memory, configurable by LSS slave */
 
 #if (CO_CONFIG_STORAGE) & CO_CONFIG_STORAGE_ENABLE
@@ -127,6 +128,12 @@ int main (void){
         return 0;
     }
 #endif
+
+    err = app_programStart(&pendingBitRate, &pendingNodeId, NULL);
+    if (err != CO_ERROR_NO) {
+        log_printf("Error: app_programStart: %d\n", err);
+        return 0;
+    }
 
 
     while(reset != CO_RESET_APP){
@@ -252,6 +259,10 @@ int main (void){
                 lastCall = ticksMs;
                 /* CANopen process */
                 reset = CO_process(CO, false, timeDifference_us, NULL);
+
+                /* Execute external application code */
+                app_programAsync(CO, timeDifference_us);
+
                 LED_red = CO_LED_RED(CO->LEDs, CO_LED_CANopen);
                 LED_green = CO_LED_GREEN(CO->LEDs, CO_LED_CANopen);
                 if (num_leds)
@@ -261,14 +272,13 @@ int main (void){
             }
 
             /* Process automatic storage */
-
-            /* optional sleep for short time */
         }
     }
 
 
     /* program exit ***************************************************************/
     /* stop threads */
+    app_programEnd();
 
 
     /* delete objects from memory */
@@ -288,6 +298,9 @@ void tmrTask_thread(void){
     uint32_t timeDifference_us = 1000;
     ticksMs++;
 
+    /* Execute external application code */
+    app_peripheralRead(CO, timeDifference_us);
+
     CO_LOCK_OD(CO->CANmodule);
     if (!CO->nodeIdUnconfigured && CO->CANmodule->CANnormal) {
         bool_t syncWas = false;
@@ -299,6 +312,9 @@ void tmrTask_thread(void){
         CO_process_RPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
 
+        /* Execute external application code */
+        app_programRt(CO, timeDifference_us);
+
 #if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
         CO_process_TPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
@@ -306,6 +322,8 @@ void tmrTask_thread(void){
             /* Further I/O or nonblocking application code may go here. */
         }
     CO_UNLOCK_OD(CO->CANmodule);
+
+    app_peripheralWrite(CO, timeDifference_us);
 }
 
 
