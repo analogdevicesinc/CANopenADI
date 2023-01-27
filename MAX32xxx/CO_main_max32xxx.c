@@ -1,10 +1,9 @@
 /*
  * CANopen main program file.
  *
- * This file is a template for other microcontrollers.
- *
- * @file        main_generic.c
- * @author      Janez Paternoster
+ * @file        CO_main_max32xxx.c
+ * @author      Analog Devices, Inc.    2023
+ * @author      Janez Paternoster       2021
  * @copyright   2021 Janez Paternoster
  *
  * This file is part of CANopenNode, an opensource CANopen Stack.
@@ -26,6 +25,12 @@
 
 
 #include <stdio.h>
+#include <string.h>
+
+#include "mxc_device.h"
+#include "can.h"
+#include "led.h"
+#include "nvic_table.h"
 
 #include "CANopen.h"
 #include "OD.h"
@@ -52,7 +57,13 @@
 /* Global variables and objects */
 CO_t *CO = NULL; /* CANopen object */
 uint8_t LED_red, LED_green;
+volatile uint32_t ticksMs = 0;
 
+/* 1ms interrupt handler */
+void tmrTask_thread(void);
+
+/* CAN interrupt handler */
+void CO_CAN1InterruptHandler(void);
 
 /* main ***********************************************************************/
 int main (void){
@@ -126,7 +137,15 @@ int main (void){
         CO->CANmodule->CANnormal = false;
 
         /* Enter CAN configuration. */
+#if TARGET_NUM == 32662
+        CANptr = MXC_CAN0;
+#elif TARGET_NUM == 32690
+        CANptr = MXC_CAN0;
+#else
+#error "Unsupported target"
+#endif
         CO_CANsetConfigurationMode((void *)&CANptr);
+        CO->CANmodule->CANptr = CANptr;
         CO_CANmodule_disable(CO->CANmodule);
 
         /* initialize CANopen */
@@ -135,6 +154,15 @@ int main (void){
             log_printf("Error: CAN initialization failed: %d\n", err);
             return 0;
         }
+
+        /* configure CAN interrupt registers */
+        MXC_CAN_EnableInt(MXC_CAN_GET_IDX(CO->CANmodule->CANptr),
+                MXC_F_CAN_INTEN_DOR | MXC_F_CAN_INTEN_BERR
+              | MXC_F_CAN_INTEN_TX | MXC_F_CAN_INTEN_RX
+              | MXC_F_CAN_INTEN_ERPSV | MXC_F_CAN_INTEN_ERWARN
+              | MXC_F_CAN_INTEN_AL, 0);
+        NVIC_EnableIRQ(CAN_IRQn);
+        MXC_NVIC_SetVector(CAN_IRQn, CO_CAN1InterruptHandler);
 
         CO_LSS_address_t lssAddress = {.identity = {
             .vendorID = OD_PERSIST_COMM.x1018_identity.vendor_ID,
@@ -185,10 +213,12 @@ int main (void){
         }
 
         /* Configure Timer interrupt function for execution every 1 millisecond */
-
-
-        /* Configure CAN transmit and receive interrupt */
-
+        /* CPU's system tick timer is used to generate interrupt every 1 millisecond. */
+        if (SysTick_Config(SystemCoreClock / 1000)) {
+            log_printf("Error: Can't setup system tick\n");
+            return 0;
+        }
+        MXC_NVIC_SetVector(SysTick_IRQn, tmrTask_thread);
 
         /* Configure CANopen callbacks, etc */
         if(!CO->nodeIdUnconfigured) {
@@ -213,17 +243,22 @@ int main (void){
         log_printf("CANopenNode - Running...\n");
         fflush(stdout);
 
+        uint32_t lastCall = 0;
         while(reset == CO_RESET_NOT){
-/* loop for normal program execution ******************************************/
+            /* loop for normal program execution ******************************************/
             /* get time difference since last function call */
-            uint32_t timeDifference_us = 500;
-
-            /* CANopen process */
-            reset = CO_process(CO, false, timeDifference_us, NULL);
-            LED_red = CO_LED_RED(CO->LEDs, CO_LED_CANopen);
-            LED_green = CO_LED_GREEN(CO->LEDs, CO_LED_CANopen);
-
-            /* Nonblocking application code may go here. */
+            if ((ticksMs - lastCall) > 0) {
+                uint32_t timeDifference_us = (ticksMs - lastCall) * 1000;
+                lastCall = ticksMs;
+                /* CANopen process */
+                reset = CO_process(CO, false, timeDifference_us, NULL);
+                LED_red = CO_LED_RED(CO->LEDs, CO_LED_CANopen);
+                LED_green = CO_LED_GREEN(CO->LEDs, CO_LED_CANopen);
+                if (num_leds)
+                    LED_green ? LED_On(0) : LED_Off(0);
+                if (num_leds > 1)
+                    LED_red ? LED_On(1) : LED_Off(1);
+            }
 
             /* Process automatic storage */
 
@@ -232,7 +267,7 @@ int main (void){
     }
 
 
-/* program exit ***************************************************************/
+    /* program exit ***************************************************************/
     /* stop threads */
 
 
@@ -249,33 +284,39 @@ int main (void){
 
 /* timer thread executes in constant intervals ********************************/
 void tmrTask_thread(void){
+    /* get time difference since last function call */
+    uint32_t timeDifference_us = 1000;
+    ticksMs++;
 
-    for(;;) {
-        CO_LOCK_OD(CO->CANmodule);
-        if (!CO->nodeIdUnconfigured && CO->CANmodule->CANnormal) {
-            bool_t syncWas = false;
-            /* get time difference since last function call */
-            uint32_t timeDifference_us = 1000;
+    CO_LOCK_OD(CO->CANmodule);
+    if (!CO->nodeIdUnconfigured && CO->CANmodule->CANnormal) {
+        bool_t syncWas = false;
 
 #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
-            syncWas = CO_process_SYNC(CO, timeDifference_us, NULL);
+        syncWas = CO_process_SYNC(CO, timeDifference_us, NULL);
 #endif
 #if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
-            CO_process_RPDO(CO, syncWas, timeDifference_us, NULL);
+        CO_process_RPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
+
 #if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
-            CO_process_TPDO(CO, syncWas, timeDifference_us, NULL);
+        CO_process_TPDO(CO, syncWas, timeDifference_us, NULL);
 #endif
 
             /* Further I/O or nonblocking application code may go here. */
         }
-        CO_UNLOCK_OD(CO->CANmodule);
-    }
+    CO_UNLOCK_OD(CO->CANmodule);
 }
 
 
 /* CAN interrupt function executes on received CAN message ********************/
-void /* interrupt */ CO_CAN1InterruptHandler(void){
-
-    /* clear interrupt flag */
+void CO_CAN1InterruptHandler(void){
+    /* interrupt flag cleared in MXC_CAN_Handler */
+#if TARGET_NUM == 32662
+    MXC_CAN_Handler(MXC_CAN_GET_IDX(MXC_CAN0));
+#elif TARGET_NUM == 32690
+    MXC_CAN_Handler(MXC_CAN_GET_IDX(MXC_CAN0));
+#else
+#error "Unsupported target"
+#endif
 }
