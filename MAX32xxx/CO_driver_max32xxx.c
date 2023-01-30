@@ -1,11 +1,10 @@
 /*
- * CAN module object for generic microcontroller.
+ * CAN module object for MAX32xxx series microcontrollers.
  *
- * This file is a template for other microcontrollers.
- *
- * @file        CO_driver.c
+ * @file        CO_driver_max32xxx.c
  * @ingroup     CO_driver
- * @author      Janez Paternoster
+ * @author      Analog Devices, Inc.    2023
+ * @author      Janez Paternoster       2020
  * @copyright   2004 - 2020 Janez Paternoster
  *
  * This file is part of CANopenNode, an opensource CANopen Stack.
@@ -160,7 +159,7 @@ CO_ReturnError_t CO_CANmodule_init(
     }
 #elif TARGET_NUM == 32690
     if (MXC_CAN_Init(MXC_CAN_GET_IDX(CANmodule->CANptr),
-            MXC_CAN_OBJ_CFG_TX_RX_DATA, canUnitEvent_cb,
+            MXC_CAN_OBJ_CFG_TXRX, canUnitEvent_cb,
             canObjEvent_cb) != E_NO_ERROR) {
         return CO_ERROR_ILLEGAL_ARGUMENT;
     }

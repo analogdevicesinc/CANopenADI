@@ -168,8 +168,15 @@ int main (void){
               | MXC_F_CAN_INTEN_TX | MXC_F_CAN_INTEN_RX
               | MXC_F_CAN_INTEN_ERPSV | MXC_F_CAN_INTEN_ERWARN
               | MXC_F_CAN_INTEN_AL, 0);
+#if TARGET_NUM == 32662
         NVIC_EnableIRQ(CAN_IRQn);
         MXC_NVIC_SetVector(CAN_IRQn, CO_CAN1InterruptHandler);
+#elif TARGET_NUM == 32690
+        NVIC_EnableIRQ(CAN0_IRQn);
+        MXC_NVIC_SetVector(CAN0_IRQn, CO_CAN1InterruptHandler);
+#else
+#error "Unsupported target"
+#endif
 
         CO_LSS_address_t lssAddress = {.identity = {
             .vendorID = OD_PERSIST_COMM.x1018_identity.vendor_ID,
