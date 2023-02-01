@@ -73,9 +73,42 @@ Evaluation kit for the MAX32662 microcontroller. A CAN transceiver is already av
 
 ### Known limitations : 
 
-- There are only two hardware acceptance filters on MAX32662 and MAX32690 which is less than what CANopen usually requires. 
+There are only two hardware acceptance filters on MAX32662 and MAX32690 which is less than what CANopen usually requires. 
 As a consequence every message on the bus has to be evaluated by the CPU before being discarded or passed to the upper 
 layers for further processing.
+
+The decision to use software filters is made in `CO_CANmodule_init`.
+
+```c
+    CANmodule->useCANrxFilters = false;
+```
+`CO_CANrxBufferInit` is invoked for each CANopen receive buffer to set the identifier and mask for acceptance filters.
+
+```c
+    /* CAN identifier and CAN mask, bit aligned with CAN module. Different on different microcontrollers. */
+	buffer->ident = MXC_CAN_STANDARD_ID(ident);
+	if(rtr){
+		buffer->ident |= MXC_CAN_BUF_CFG_RTR(1);
+	}
+	buffer->mask = MXC_CAN_STANDARD_ID(mask) | MXC_CAN_BUF_CFG_RTR(1);
+```
+
+The received messages are then checked against previously set filters, in function `CO_CANRXinterrupt`.
+
+```c
+    else{
+        /* CAN module filters are not used, message with any standard 11-bit identifier */
+        /* has been received. Search rxArray from CANmodule for the same CAN-ID. */
+        buffer = &CANmodule->rxArray[0];
+        for(index = CANmodule->rxSize; index > 0U; index--){
+            if(((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U){
+                msgMatched = true;
+                break;
+            }
+            buffer++;
+        }
+    }
+```
 
 ## License
 
