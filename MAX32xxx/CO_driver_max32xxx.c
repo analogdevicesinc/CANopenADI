@@ -152,16 +152,21 @@ CO_ReturnError_t CO_CANmodule_init(
 
 
     /* Configure CAN module registers */
+    if (MXC_CAN_PowerControl(MXC_CAN_GET_IDX(CANmodule->CANptr),
+        MXC_CAN_PWR_CTRL_FULL) != E_NO_ERROR) {
+        PRINT("%s: Error: MXC_CAN_PowerControl() failed\n", __func__);
+        return CO_ERROR_INVALID_STATE;
+    }
 #if TARGET_NUM == 32662
     if (MXC_CAN_Init(MXC_CAN_GET_IDX(CANmodule->CANptr), MXC_CAN_OBJ_CFG_TXRX,
             canUnitEvent_cb, canObjEvent_cb, MAP_B) != E_NO_ERROR) {
-        return CO_ERROR_ILLEGAL_ARGUMENT;
+        return CO_ERROR_INVALID_STATE;
     }
 #elif TARGET_NUM == 32690
     if (MXC_CAN_Init(MXC_CAN_GET_IDX(CANmodule->CANptr),
             MXC_CAN_OBJ_CFG_TXRX, canUnitEvent_cb,
             canObjEvent_cb) != E_NO_ERROR) {
-        return CO_ERROR_ILLEGAL_ARGUMENT;
+        return CO_ERROR_INVALID_STATE;
     }
 #endif
 
@@ -197,7 +202,10 @@ CO_ReturnError_t CO_CANmodule_init(
         /* CAN module filters are not used, all messages with standard 11-bit */
         /* identifier will be received */
         /* Configure mask 0 so, that all messages with standard identifier are accepted */
-        MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
+    	MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
+		MXC_CAN_FILT_CFG_MASK_DEL | MXC_CAN_FILT_CFG_SINGLE_STD_ID,
+		CAN_STD_ID_MASK, 0);
+    	MXC_CAN_ObjectSetFilter(MXC_CAN_GET_IDX(CANmodule->CANptr),
                 MXC_CAN_FILT_CFG_MASK_ADD | MXC_CAN_FILT_CFG_SINGLE_STD_ID,
                 CAN_STD_ID_MASK, 0);
     }
