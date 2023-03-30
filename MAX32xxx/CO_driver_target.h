@@ -41,6 +41,17 @@
 /* Disable storage */
 #define CO_CONFIG_STORAGE	0x00
 
+#ifndef CO_CONFIG_SDO_SRV
+#define CO_CONFIG_SDO_SRV (CO_CONFIG_SDO_SRV_SEGMENTED | \
+                           CO_CONFIG_SDO_SRV_BLOCK)
+#endif
+#ifndef CO_CONFIG_SDO_SRV_BUFFER_SIZE
+#define CO_CONFIG_SDO_SRV_BUFFER_SIZE 900
+#endif
+#ifndef CO_CONFIG_CRC16
+#define CO_CONFIG_CRC16 (CO_CONFIG_CRC16_ENABLE)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

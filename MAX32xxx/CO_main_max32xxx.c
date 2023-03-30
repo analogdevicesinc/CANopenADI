@@ -28,6 +28,8 @@
 #include <string.h>
 
 #include "mxc_device.h"
+#include "mxc_sys.h"
+#include "mxc_delay.h"
 #include "can.h"
 #include "led.h"
 #include "nvic_table.h"
@@ -71,6 +73,7 @@ int main (void){
     CO_ReturnError_t err;
     CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
     uint32_t heapMemoryUsed;
+    uint32_t errInfo = 0;
     void *CANptr = NULL; /* CAN module address */
     uint8_t pendingNodeId = 0; /* read from dip switches or nonvolatile memory, configurable by LSS slave */
     uint8_t activeNodeId = 0; /* Copied from CO_pendingNodeId in the communication reset section */
@@ -129,7 +132,7 @@ int main (void){
     }
 #endif
 
-    err = app_programStart(&pendingBitRate, &pendingNodeId, NULL);
+    err = app_programStart(&pendingBitRate, &pendingNodeId, &errInfo);
     if (err != CO_ERROR_NO) {
         log_printf("Error: app_programStart: %d\n", err);
         return 0;
@@ -287,14 +290,21 @@ int main (void){
     /* stop threads */
     app_programEnd();
 
+    /* disable timer interrupts before releasing resources */
+    SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
+    MXC_Delay(10000);
 
     /* delete objects from memory */
     CO_CANsetConfigurationMode((void *)&CANptr);
     CO_delete(CO);
-
     log_printf("CANopenNode finished\n");
 
     /* reset */
+    log_printf("Resetting...\n");
+    MXC_Delay(10000);
+    MXC_SYS_Reset_Periph(MXC_SYS_RESET0_SYS);
+    while(1);
+
     return 0;
 }
 
