@@ -77,7 +77,7 @@ int main (void){
     void *CANptr = NULL; /* CAN module address */
     uint8_t pendingNodeId = 0; /* read from dip switches or nonvolatile memory, configurable by LSS slave */
     uint8_t activeNodeId = 0; /* Copied from CO_pendingNodeId in the communication reset section */
-    uint16_t pendingBitRate = 125;  /* read from dip switches or nonvolatile memory, configurable by LSS slave */
+    uint16_t pendingBitRate = 0;  /* read from dip switches or nonvolatile memory, configurable by LSS slave */
 
 #if (CO_CONFIG_STORAGE) & CO_CONFIG_STORAGE_ENABLE
     CO_storage_t storage;
