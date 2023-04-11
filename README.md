@@ -1,4 +1,4 @@
-# CANopenNode Analog Devices Inc.
+# CANopenNode Analog Devices Inc.           {#readmeCANopenADI}
 
 CANopenADI is a CANopen stack running on Analog Devices Inc. MAX32662 and MAX32690 microcontroller based on [CANOpenNode](https://github.com/CANopenNode/CANopenNode) stack.
 
@@ -10,7 +10,7 @@ In order to run the demos, you will need:
 
 - A DAPLink debug adapter for flashing and debugging: [MAX32625PICO](https://www.analog.com/en/design-center/evaluation-hardware-and-software/evaluation-boards-kits/max32625pico.html)
 
-#### Cloning the project
+### Cloning the project
 
 Clone the project from git repository and get submodules:
 
@@ -27,7 +27,7 @@ git pull
 git submodule update --init --recursive
 ```
 
-#### Importing projects
+### Importing projects
 
 You can import example projects into Eclipse MaximSDK.
 
@@ -40,7 +40,7 @@ You can import example projects into Eclipse MaximSDK.
 
 See also this [guide](https://analog-devices-msdk.github.io/msdk/USERGUIDE/#importing-examples) for more information about setting up projects in Eclipse MaximSDK.
 
-#### Building and running
+### Building and running
 
 1. Select the example project in the **Launch Configuration** list.
 2. Click the hammer icon on the left to build the project.
@@ -61,12 +61,12 @@ Example projects mostly differ in their **Object Dictionary** configurations. Us
 ## Supported boards and MCUs
  
 
-### [MAX32690-EvKit](https://www.analog.com/).
+[MAX32690-EvKit](https://www.analog.com/)
 
 Evaluation kit for the MAX32690 microcontroller. A CAN transceiver is already available on the board. The data lines are exposed at JH8, labelled CAN0. You can connect CANH and CANL lines to an existing network or another board's CAN port.
 
 
-### [MAX32662-EvKit](https://www.analog.com/)
+[MAX32662-EvKit](https://www.analog.com/)
 
 Evaluation kit for the MAX32662 microcontroller. A CAN transceiver is already available on the board. The data lines are exposed at JH3, labelled CANB. You can connect CANH and CANL lines to an existing network or another board's CAN port.
 
